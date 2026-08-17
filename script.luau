@@ -242,9 +242,12 @@ function script.actions.get_current_biome()
         return script.state.biome_cached or "Unknown"
     end
 
-    local value = script.actions.get_server_info_biome()
+    -- // UI label first: on event maps the ServerInfo "CurrentBiome" attribute
+    -- // stays at its stale default (e.g. "Normal") while the real biome is
+    -- // only shown in the UI (e.g. "SAND STORM")
+    local value = script.actions.get_ui_biome()
         or script.actions.get_replica_biome()
-        or script.actions.get_ui_biome()
+        or script.actions.get_server_info_biome()
 
     if value then
         script.state.biome_cached = value
@@ -566,18 +569,31 @@ function script.actions.consider_merchant_instance(instance)
         return
     end
 
-    local key = script.actions.compact_text(instance.Name)
-
-    if key == "" then
+    if instance.ClassName ~= "Model" then
         return
     end
 
-    local looks_like_merchant = key:find("merchant", 1, true)
-        or key:match("^rin") or key:match("^mari") or key:match("^jester")
+    -- // exact NPC names only: loose prefix matching reports player aura
+    -- // models like "mariotendo666Aura" as merchants
+    local key = script.actions.compact_text(instance.Name)
 
-    if looks_like_merchant then
-        script.actions.mark_merchant_spawned(instance.Name)
+    if key ~= "rin" and key ~= "mari" and key ~= "jester" then
+        return
     end
+
+    -- // merchant NPCs are Model + Humanoid + Torso with a ProximityPrompt;
+    -- // player characters carry HumanoidRootPart instead, auras carry neither
+    if not instance:FindFirstChildOfClass("Humanoid") then
+        return
+    end
+
+    local torso = instance:FindFirstChild("Torso")
+
+    if not torso or not torso:FindFirstChildOfClass("ProximityPrompt") then
+        return
+    end
+
+    script.actions.mark_merchant_spawned(instance.Name)
 end
 
 function script.actions.start_merchant_watcher()
@@ -987,4 +1003,12 @@ function script.actions.run()
     end
 end
 
-script.actions.run()
+-- // never run synchronously: run() never returns, and a loadstring call that
+-- // blocks forever can crash high-level executors after a few rejoins
+task.spawn(function()
+    local ok, err = pcall(script.actions.run)
+
+    if not ok then
+        print("[biome hunt] crashed: " .. tostring(err))
+    end
+end)
