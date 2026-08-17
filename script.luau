@@ -677,6 +677,12 @@ function script.actions.send_webhook(payload, allow_retry)
 
     if not ok or type(response) ~= "table" then
         print("[biome hunt] webhook request failed or timed out")
+
+        if allow_retry ~= false then
+            task.wait(3)
+            return script.actions.send_webhook(payload, false)
+        end
+
         return false
     end
 
@@ -699,6 +705,12 @@ function script.actions.send_webhook(payload, allow_retry)
 
     if status < 200 or status >= 300 then
         print("[biome hunt] webhook status " .. tostring(status) .. " " .. tostring(response.Body):sub(1, 120))
+
+        if allow_retry ~= false then
+            task.wait(3)
+            return script.actions.send_webhook(payload, false)
+        end
+
         return false
     end
 
@@ -936,6 +948,30 @@ function script.actions.wait_for_biome(timeout)
     return "Unknown"
 end
 
+-- // game.Loaded only covers the base place load; the world (ServerInfo,
+-- // Remote.Merchant, the MainInterface biome label) still needs time, so
+-- // detection never runs against an empty shell
+function script.actions.wait_until_ready(timeout)
+    local deadline = os.clock() + (timeout or 90)
+
+    while os.clock() < deadline and script.actions.script_active() do
+        if game:IsLoaded() then
+            local player_gui = local_player:FindFirstChild("PlayerGui")
+            local main_interface = player_gui and player_gui:FindFirstChild("MainInterface")
+            local server_info = replicated_storage:FindFirstChild("ServerInfo")
+            local remote_root = replicated_storage:FindFirstChild("Remote")
+
+            if main_interface and server_info and remote_root then
+                return true
+            end
+        end
+
+        task.wait(1)
+    end
+
+    return false
+end
+
 function script.actions.looks_like_sols()
     if replicated_storage:FindFirstChild("ServerInfo") then
         return true
@@ -960,6 +996,15 @@ function script.actions.run()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
+
+    if not script.actions.wait_until_ready(90) then
+        print("[biome hunt] game never became ready — stopping")
+        return
+    end
+
+    -- // let the UI biome label settle after the world mounts, so the first
+    -- // read is the real biome instead of a stale default like "Normal"
+    task.wait(2)
 
     print("[biome hunt] starting (visit #" .. tostring(script.state.visit_number) .. ")")
 
