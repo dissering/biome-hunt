@@ -15,6 +15,9 @@ local webhook = ""
 local source_url = "https://raw.githubusercontent.com/dissering/biome-hunt/main/script.luau"
 
 local webhook_username = "Biome Hunt"
+local hosted_by = local_player.Name
+local hosted_avatar = "https://www.roblox.com/headshot-thumbnail/image?userId="
+    .. tostring(local_player.UserId) .. "&width=420&height=420&format=png"
 local biome_wait_seconds = 30
 local request_timeout_seconds = 8
 
@@ -55,6 +58,8 @@ script.state.biome_cached_at = 0
 script.state.server_replica = nil
 script.state.last_alert_biome = nil
 script.state.last_alert_at = 0
+script.state.last_alert_signature = nil
+script.state.notify_busy = false
 
 function script.actions.script_active()
     return _G.__stella_biome_hunt_generation == generation
@@ -697,6 +702,12 @@ function script.actions.wait_for_stock(timeout)
 end
 
 function script.actions.notify_biome(biome, force)
+    -- // one alert in flight at a time: the running call already includes
+    -- // anything the merchant watcher detected while it waits for stock
+    if script.state.notify_busy then
+        return
+    end
+
     local ping_tier = script.actions.is_ping_biome(biome)
 
     if not force then
@@ -707,26 +718,37 @@ function script.actions.notify_biome(biome, force)
         end
     end
 
-    script.state.last_alert_biome = biome
-    script.state.last_alert_at = os.clock()
+    script.state.notify_busy = true
 
     script.actions.wait_for_stock(10)
+
+    local merchant = script.state.merchant_name or "None"
+    local stock = script.state.merchant_stock or "unknown"
+    local signature = biome .. "|" .. merchant .. "|" .. stock
+
+    -- // a forced follow-up only goes out when something actually changed
+    if force and signature == script.state.last_alert_signature then
+        script.state.notify_busy = false
+        return
+    end
 
     local content = (ping_tier and "@everyone\n\n" or "")
         .. "**__Biome Hunt__**\n"
         .. "**Biome:** " .. biome .. "\n"
-        .. "**Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
+        .. "**Merchant:** " .. merchant .. "\n"
 
     if script.state.merchant_name then
-        content = content .. "**Stock:** " .. (script.state.merchant_stock or "unknown") .. "\n"
+        content = content .. "**Stock:** " .. stock .. "\n"
     end
 
     content = content
         .. "**Players:** " .. script.actions.get_players_field() .. "\n"
+        .. "**Hosted by:** " .. hosted_by .. "\n"
         .. "[Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")"
 
     local payload = {
         username = webhook_username,
+        avatar_url = hosted_avatar,
         content = content,
         flags = 4,
     }
@@ -736,6 +758,15 @@ function script.actions.notify_biome(biome, force)
     end
 
     local delivered = script.actions.send_webhook(payload, true)
+
+    script.state.last_alert_biome = biome
+    script.state.last_alert_at = os.clock()
+
+    if delivered then
+        script.state.last_alert_signature = signature
+    end
+
+    script.state.notify_busy = false
 
     print("[biome hunt] biome " .. biome .. (delivered and " reported" or " report failed"))
 end
