@@ -12,12 +12,12 @@ Stella biome hunter for Sol's RNG. It server-hops, reads the biome in every serv
 
 ```lua
 getgenv().webhook = "https://discord.com/api/webhooks/YOUR/WEBHOOK"
-loadstring(game:HttpGet("https://raw.githubusercontent.com/dissering/biome-hunt/main/biome-hunt.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/dissering/biome-hunt/main/main.lua"))()
 ```
 
 `getgenv().webhook` is the only setting. It survives server hops (it lives in the executor environment, not in this repo), so alerts keep firing after every rejoin.
 
-You can also just fill in the `local webhook = ""` line at the top of `biome-hunt.lua` instead — `getgenv().webhook` wins over it when both are set.
+You can also just fill in the `local webhook = ""` line at the top of `main.lua` instead — `getgenv().webhook` wins over it when both are set.
 
 ## how it works
 
