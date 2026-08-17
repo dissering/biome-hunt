@@ -48,6 +48,7 @@ script.state.visit_number = (tonumber(executor_env.__stella_biome_hunt_visits) o
 executor_env.__stella_biome_hunt_visits = script.state.visit_number
 
 script.state.merchant_name = nil
+script.state.merchant_stock = nil
 script.state.merchant_seen_at = {}
 script.state.biome_cached = nil
 script.state.biome_cached_at = 0
@@ -290,6 +291,213 @@ function script.actions.parse_merchant_name(payload)
     return nil
 end
 
+function script.actions.get_field(payload, field_names)
+    if type(payload) ~= "table" then
+        return nil
+    end
+
+    for _, field_name in ipairs(field_names) do
+        local value = payload[field_name]
+
+        if value ~= nil then
+            return value
+        end
+    end
+
+    return nil
+end
+
+function script.actions.parse_quantity(value, depth)
+    if type(value) == "number" then
+        return value
+    end
+
+    if type(value) == "string" then
+        return tonumber(value)
+    end
+
+    if type(value) ~= "table" or (tonumber(depth) or 0) > 3 then
+        return nil
+    end
+
+    local direct = script.actions.get_field(value, {
+        "StockLeft", "stock_left", "stockLeft", "Stock", "stock",
+        "Quantity", "quantity", "Remaining", "remaining",
+    })
+
+    if direct ~= nil then
+        return script.actions.parse_quantity(direct, (tonumber(depth) or 0) + 1)
+    end
+
+    for _, field_name in ipairs({ "result", "Result", "data", "Data", "value", "Value" }) do
+        local nested = value[field_name]
+
+        if nested ~= nil then
+            local parsed = script.actions.parse_quantity(nested, (tonumber(depth) or 0) + 1)
+
+            if parsed ~= nil then
+                return parsed
+            end
+        end
+    end
+
+    return nil
+end
+
+function script.actions.parse_boolean(value)
+    if type(value) == "boolean" then
+        return value
+    end
+
+    if type(value) == "number" then
+        return value ~= 0
+    end
+
+    if type(value) == "string" then
+        local key = value:lower()
+
+        if key == "true" or key == "1" or key == "yes" then
+            return true
+        elseif key == "false" or key == "0" or key == "no" then
+            return false
+        end
+    end
+
+    return nil
+end
+
+function script.actions.collect_product_sources(payload, output, visited, depth)
+    if type(payload) ~= "table" or visited[payload] or (tonumber(depth) or 0) > 5 then
+        return
+    end
+
+    visited[payload] = true
+
+    local products = script.actions.get_field(payload, {
+        "product_list", "productList", "Products", "products", "Items", "items",
+    })
+
+    if type(products) == "table" then
+        table.insert(output, products)
+
+        return
+    end
+
+    for _, nested in pairs(payload) do
+        if type(nested) == "table" then
+            script.actions.collect_product_sources(nested, output, visited, (tonumber(depth) or 0) + 1)
+        end
+    end
+end
+
+function script.actions.format_stock_text(records)
+    local in_stock = {}
+    local sold_out = {}
+
+    for _, record in ipairs(records) do
+        if record.available then
+            local suffix = ""
+
+            if record.quantity ~= nil and record.quantity ~= math.huge then
+                suffix = " x" .. tostring(math.floor(record.quantity))
+            end
+
+            table.insert(in_stock, record.name .. suffix)
+        else
+            table.insert(sold_out, "~~" .. record.name .. "~~")
+        end
+    end
+
+    local parts = {}
+
+    if #in_stock > 0 then
+        table.insert(parts, table.concat(in_stock, ", "))
+    end
+
+    if #sold_out > 0 then
+        table.insert(parts, table.concat(sold_out, ", "))
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+
+    local text = table.concat(parts, "\n")
+
+    if #text > 900 then
+        text = text:sub(1, 897) .. "..."
+    end
+
+    return text
+end
+
+-- // stock rides along the merchant remotes (same parse as the main Sol's script)
+function script.actions.update_merchant_stock(...)
+    local arguments = table.pack(...)
+    local sources = {}
+
+    for index = 1, arguments.n do
+        script.actions.collect_product_sources(arguments[index], sources, {}, 0)
+    end
+
+    if #sources == 0 then
+        return
+    end
+
+    local records = {}
+
+    for _, source in ipairs(sources) do
+        for product_key, product in pairs(source) do
+            if #records >= 40 then
+                break
+            end
+
+            if type(product) == "table" then
+                local name = script.actions.get_field(product, {
+                    "ProductDisplayName", "productDisplayName", "ProductName", "productName",
+                    "DisplayName", "displayName", "Name", "name",
+                }) or product_key
+                local quantity = script.actions.parse_quantity(product, 0)
+                local sold_out = script.actions.parse_boolean(script.actions.get_field(product, {
+                    "SoldOut", "sold_out", "soldOut", "IsSoldOut",
+                }))
+                local locked = script.actions.parse_boolean(script.actions.get_field(product, {
+                    "Locked", "locked", "IsLocked", "isLocked",
+                }))
+                local available = script.actions.parse_boolean(script.actions.get_field(product, {
+                    "Available", "available", "IsAvailable", "is_available",
+                }))
+
+                if locked == true or sold_out == true then
+                    available = false
+                elseif quantity ~= nil then
+                    available = quantity == math.huge or quantity > 0
+                elseif available == nil then
+                    available = true
+                end
+
+                table.insert(records, {
+                    name = tostring(name),
+                    quantity = quantity,
+                    available = available == true,
+                })
+            elseif type(product) == "string" then
+                table.insert(records, { name = product, quantity = nil, available = true })
+            end
+        end
+
+        if #records > 0 then
+            break
+        end
+    end
+
+    if #records == 0 then
+        return
+    end
+
+    script.state.merchant_stock = script.actions.format_stock_text(records)
+end
+
 function script.actions.mark_merchant_spawned(raw_name)
     local merchant_name = script.actions.normalize_merchant_name(raw_name)
         or script.state.merchant_name or "Unknown merchant"
@@ -303,14 +511,30 @@ function script.actions.mark_merchant_spawned(raw_name)
     end
 
     script.state.merchant_seen_at[key] = now
-    script.actions.notify_merchant(merchant_name)
+    script.state.merchant_stock = nil
+
+    -- // give the stock remotes a moment to land before posting the alert
+    task.delay(2.5, function()
+        if not script.actions.script_active() then
+            return
+        end
+
+        if script.state.merchant_name ~= merchant_name then
+            return
+        end
+
+        script.actions.notify_merchant(merchant_name)
+    end)
 end
 
 function script.actions.handle_merchant_remote(event_name, ...)
     if event_name == "MerchantDespawned" then
         script.state.merchant_name = nil
+        script.state.merchant_stock = nil
         return
     end
+
+    script.actions.update_merchant_stock(...)
 
     local arguments = table.pack(...)
     local raw_name = script.actions.parse_merchant_name(arguments[1])
@@ -360,7 +584,7 @@ function script.actions.start_merchant_watcher()
             local merchant_root = remote_root and remote_root:FindFirstChild("Merchant")
 
             if merchant_root then
-                for _, event_name in ipairs({ "MerchantSpawned", "MerchantOpened", "MerchantDespawned" }) do
+                for _, event_name in ipairs({ "MerchantSpawned", "MerchantOpened", "FetchProducts", "ProductQuantityUpdated", "MerchantDespawned" }) do
                     local event = merchant_root:FindFirstChild(event_name)
 
                     if event and event:IsA("RemoteEvent") and not bound[event] then
@@ -383,7 +607,7 @@ function script.actions.start_merchant_watcher()
                 bound_count = bound_count + 1
             end
 
-            if bound_count >= 3 then
+            if bound_count >= 5 then
                 break
             end
 
@@ -469,12 +693,19 @@ function script.actions.notify_biome(biome)
     script.state.last_alert_biome = biome
     script.state.last_alert_at = os.clock()
 
+    local stock_line = ""
+
+    if script.state.merchant_name and script.state.merchant_stock then
+        stock_line = "**Stock:** " .. script.state.merchant_stock .. "\n"
+    end
+
     local content = (ping_tier and "@everyone\n\n" or "")
         .. "**__Biome Hunt__**\n"
-        .. "> **Biome:** " .. biome .. "\n"
-        .. "> **Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
-        .. "> **Players:** " .. script.actions.get_players_field() .. "\n"
-        .. "> **Join:** " .. script.actions.get_server_join_link(game.JobId) .. "\n"
+        .. "**Biome:** " .. biome .. "\n"
+        .. "**Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
+        .. stock_line
+        .. "**Players:** " .. script.actions.get_players_field() .. "\n"
+        .. "**Join:** [Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
         .. "-# Sol's RNG • biome hunt"
 
     local payload = {
@@ -496,10 +727,11 @@ function script.actions.notify_merchant(merchant_name)
     local biome = script.actions.get_current_biome()
 
     local content = "**__Merchant Spawned__**\n"
-        .. "> **Merchant:** " .. merchant_name .. "\n"
-        .. "> **Biome:** " .. (biome ~= "Unknown" and biome or "?") .. "\n"
-        .. "> **Players:** " .. script.actions.get_players_field() .. "\n"
-        .. "> **Join:** " .. script.actions.get_server_join_link(game.JobId) .. "\n"
+        .. "**Merchant:** " .. merchant_name .. "\n"
+        .. "**Biome:** " .. (biome ~= "Unknown" and biome or "?") .. "\n"
+        .. "**Players:** " .. script.actions.get_players_field() .. "\n"
+        .. "**Stock:** " .. (script.state.merchant_stock or "checking...") .. "\n"
+        .. "**Join:** [Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
         .. "-# Sol's RNG • biome hunt"
 
     local payload = {
