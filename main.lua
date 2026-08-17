@@ -30,7 +30,7 @@ local all_biomes = {
     "Normal", "Rainy", "Snowy", "Windy", "SandStorm",
     "Dreamspace", "Glitched", "Blood Rain", "RedFullMoon", "Aurora",
     "Starfall", "Singularity", "RadiantForest", "Hell", "Null",
-    "Heaven", "Corrupt", "Corruption", "Blazing Sun",
+    "Heaven", "Corrupt", "Corruption", "Blazing Sun", "Cyberspace",
 }
 
 -- // everyday weather biomes: reported but never worth staying for
@@ -52,6 +52,7 @@ local biome_colors = {
     Corruption = 0x8E24AA,
     RadiantForest = 0x66BB6A,
     ["Blazing Sun"] = 0xFFB300,
+    Cyberspace = 0xFF40C8,
 }
 
 local generation = (tonumber(_G.__stella_biome_hunt_generation) or 0) + 1
@@ -240,11 +241,12 @@ function script.actions.get_current_biome()
     return value or "Unknown"
 end
 
--- // built-in @everyone pings: Singularity, Dreamspace, Glitched
+-- // built-in @everyone pings: Singularity, Dreamspace, Glitched, Cyberspace
 function script.actions.is_ping_biome(biome)
     local key = script.actions.biome_key(biome)
 
-    return key == "singularity" or key == "dreamspace" or key == "glitched"
+    return key == "singularity" or key == "dreamspace"
+        or key == "glitched" or key == "cyberspace"
 end
 
 function script.actions.is_stay_biome(biome)
