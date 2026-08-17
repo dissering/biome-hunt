@@ -1,21 +1,3 @@
--- // biome-hunt.lua — Stella biome hunter for Sol's RNG
--- //
--- // Run it with this one-liner (Potassium / any executor):
--- //   loadstring(game:HttpGet("https://raw.githubusercontent.com/dissering/biome-hunt/main/biome-hunt.lua"))()
--- //
--- // Server-hops Sol's RNG, reads the current biome in every server and reports
--- // it to a Discord webhook with a Join Server button. @everyone is pinged for
--- // Singularity / Dreamspace / Glitched, and merchant spawns (Rin / Mari /
--- // Jester) get their own alert with a join button while the hunter stays in
--- // that server so the button keeps working. After every hop it re-queues
--- // itself from this same URL, so hunting continues automatically after every
--- // rejoin. To stop: join any other game (the queued loader exits) or delete
--- // the repo file. To change settings: edit the config table, re-upload, and
--- // re-run the one-liner. The webhook URL is only baked into this local copy —
--- // the public repo build leaves it empty and instead reads it from
--- // "stella_biome_hunt_webhook.txt" in the executor workspace, which this
--- // local copy writes automatically on every run.
-
 local script = { actions = {}, state = {} }
 
 local players_service = game:GetService("Players")
@@ -26,41 +8,36 @@ local http_service = game:GetService("HttpService")
 local local_player = players_service.LocalPlayer
 local executor_env = type(getgenv) == "function" and getgenv() or _G
 
--- // where the local-only webhook url is stashed so the hosted (webhook-less)
--- // build that gets re-queued after hops can pick it up again
-local webhook_file = "stella_biome_hunt_webhook.txt"
-
 local config = {
-    -- // where this script lives: used to re-queue itself after every hop
     source_url = "https://raw.githubusercontent.com/dissering/biome-hunt/main/biome-hunt.lua",
-
-    webhook_url = "", -- // scrubbed for the public repo: falls back to the workspace file
+    webhook_url = "",
     webhook_username = "Stella Biome Hunt",
     logo_url = "https://raw.githubusercontent.com/dissering/storage/main/stella/stella%20full.png",
-
-    -- // biomes that ping @everyone
     ping_everyone_biomes = { "Singularity", "Dreamspace", "Glitched" },
-
-    -- // true = webhook for every server joined (shows the biome name each hop)
-    -- // false = only notable biomes and merchant spawns get posted
     report_all_servers = true,
-
-    -- // stay in the server (so the join button stays useful) while a known
-    -- // notable biome or a merchant is active; unrecognized biome names are
-    -- // reported but never trigger a stay
     stay_on_rare = true,
     stay_on_merchant = true,
-
-    -- // optional: user id to mention when a merchant spawns, e.g. "12345678"
     merchant_mention_user_id = "",
-
-    -- // server picking / pacing
     min_server_players = 0,
     settle_delay_range = { 3, 5 },
     stay_cap_seconds = 300,
     biome_wait_seconds = 30,
     request_timeout_seconds = 8,
 }
+
+local stored_config = executor_env.biome_hunt
+
+if type(stored_config) == "table" then
+    for key, value in pairs(stored_config) do
+        config[key] = value
+    end
+end
+
+local stored_webhook = executor_env.webhook
+
+if type(stored_webhook) == "string" and stored_webhook ~= "" then
+    config.webhook_url = stored_webhook
+end
 
 local all_biomes = {
     "Normal", "Rainy", "Snowy", "Windy", "SandStorm",
@@ -176,8 +153,6 @@ function script.actions.get_queue_function()
     return type(queue_function) == "function" and queue_function or nil
 end
 
--- // executor request has no timeout option: run it on its own thread and
--- // abandon it if it hangs, otherwise one stuck http call freezes the hunt
 function script.actions.request_with_timeout(options, timeout)
     local request_function = script.actions.get_request_function()
 
@@ -293,7 +268,6 @@ end
 
 function script.actions.is_notable_biome(biome)
     if script.actions.canonical_biome(biome) == nil then
-        -- // an unrecognized name is worth showing, but never pings
         return tostring(biome or "") ~= "" and biome ~= "Unknown"
     end
 
@@ -308,8 +282,6 @@ function script.actions.is_notable_biome(biome)
     return true
 end
 
--- // only *known* non-common biomes qualify for staying: an unrecognized name
--- // (new/unknown biome) gets reported but the hunter keeps hopping
 function script.actions.is_stay_biome(biome)
     if script.actions.canonical_biome(biome) == nil then
         return false
@@ -372,7 +344,6 @@ function script.actions.mark_merchant_spawned(raw_name)
 
     script.state.merchant_name = merchant_name
 
-    -- // the game fires several merchant remotes per spawn: only alert once
     if script.state.merchant_seen_at[key] and now - script.state.merchant_seen_at[key] < 30 then
         return
     end
@@ -466,7 +437,6 @@ function script.actions.start_merchant_watcher()
         end
     end)
 
-    -- // catch a merchant that spawned before the remote watcher connected
     for _, child in ipairs(workspace:GetChildren()) do
         script.actions.consider_merchant_instance(child)
     end
@@ -498,38 +468,9 @@ function script.actions.get_players_field()
     return tostring(#players_service:GetPlayers())
 end
 
-function script.actions.sync_webhook_url()
-    if config.webhook_url ~= "" then
-        -- // local build: keep the url on disk for the hosted build's hops
-        if type(writefile) == "function" then
-            pcall(function()
-                writefile(webhook_file, config.webhook_url)
-            end)
-        end
-
-        return
-    end
-
-    -- // hosted build: url was scrubbed from the public repo, load it back
-    if type(readfile) == "function" then
-        local ok, stored = pcall(function()
-            return readfile(webhook_file)
-        end)
-
-        if ok and type(stored) == "string" then
-            stored = stored:gsub("^%s+", ""):gsub("%s+$", "")
-
-            if stored:find("https://", 1, true) then
-                config.webhook_url = stored
-                print("[stella biome hunt] webhook url loaded from workspace file")
-            end
-        end
-    end
-end
-
 function script.actions.send_webhook(payload, allow_retry)
     if config.webhook_url == "" then
-        print("[stella biome hunt] no webhook url configured — skipping discord alert")
+        print("[stella biome hunt] no webhook url set (getgenv().webhook) — skipping alert")
         return false
     end
 
@@ -548,7 +489,6 @@ function script.actions.send_webhook(payload, allow_retry)
     local status = tonumber(response.StatusCode) or 0
 
     if status == 400 and payload.components and allow_retry ~= false then
-        -- // some webhook setups reject button components: retry once without them
         payload.components = nil
 
         return script.actions.send_webhook(payload, false)
@@ -749,8 +689,6 @@ function script.actions.hop()
         if ok then
             print("[stella biome hunt] teleport requested to " .. target_job_id)
 
-            -- // if the teleport goes through this thread dies with the server;
-            -- // otherwise the run loop retries after this wait
             task.wait(12)
             return true
         end
@@ -759,7 +697,6 @@ function script.actions.hop()
         task.wait(2)
     end
 
-    -- // matchmaking fallback: still a fresh server, just not hand-picked
     local ok, err = pcall(function()
         teleport_service:Teleport(game.PlaceId, local_player)
     end)
@@ -850,8 +787,6 @@ function script.actions.run()
     if not game:IsLoaded() then
         game.Loaded:Wait()
     end
-
-    script.actions.sync_webhook_url()
 
     print("[stella biome hunt] starting (visit #" .. tostring(script.state.visit_number) .. ")")
 
