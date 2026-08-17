@@ -65,6 +65,7 @@ script.state.merchant_name = nil
 script.state.merchant_seen_at = {}
 script.state.biome_cached = nil
 script.state.biome_cached_at = 0
+script.state.server_replica = nil
 
 function script.actions.script_active()
     return _G.__stella_biome_hunt_generation == generation
@@ -172,20 +173,38 @@ function script.actions.request_with_timeout(options, timeout)
     return call_ok, response
 end
 
-function script.actions.get_replica_biome()
-    local modules = replicated_storage:FindFirstChild("Modules")
-    local utility = modules and modules:FindFirstChild("Utility")
-    local replica_module = utility and utility:FindFirstChild("Replica")
+-- // GetServerReplica can yield forever, so it only ever runs on its own
+-- // thread here and detection just reads whatever it managed to cache
+function script.actions.start_replica_loader()
+    task.spawn(function()
+        while script.actions.script_active() do
+            if type(script.state.server_replica) ~= "table" then
+                local ok, result = pcall(function()
+                    local modules = replicated_storage:FindFirstChild("Modules")
+                    local utility = modules and modules:FindFirstChild("Utility")
+                    local replica_module = utility and utility:FindFirstChild("Replica")
 
-    if not replica_module then
-        return nil
-    end
+                    if not replica_module then
+                        return nil
+                    end
 
-    local ok, replica = pcall(function()
-        return require(replica_module).GetServerReplica()
+                    return require(replica_module).GetServerReplica()
+                end)
+
+                if ok and type(result) == "table" and type(result.Data) == "table" then
+                    script.state.server_replica = result
+                end
+            end
+
+            task.wait(2)
+        end
     end)
+end
 
-    if ok and type(replica) == "table" and type(replica.Data) == "table" then
+function script.actions.get_replica_biome()
+    local replica = script.state.server_replica
+
+    if type(replica) == "table" and type(replica.Data) == "table" then
         return script.actions.canonical_biome(replica.Data.Biome or replica.Data.BiomeName)
     end
 
@@ -229,8 +248,8 @@ function script.actions.get_current_biome()
         return script.state.biome_cached or "Unknown"
     end
 
-    local value = script.actions.get_replica_biome()
-        or script.actions.get_server_info_biome()
+    local value = script.actions.get_server_info_biome()
+        or script.actions.get_replica_biome()
         or script.actions.get_ui_biome()
 
     if value then
@@ -752,6 +771,7 @@ function script.actions.run()
         end
     end
 
+    script.actions.start_replica_loader()
     script.actions.start_merchant_watcher()
 
     local biome = script.actions.wait_for_biome()
