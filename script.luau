@@ -53,6 +53,7 @@ executor_env.__stella_biome_hunt_visits = script.state.visit_number
 script.state.merchant_name = nil
 script.state.merchant_stock = nil
 script.state.merchant_seen_at = {}
+script.state.merchant_empty_polls = 0
 script.state.biome_cached = nil
 script.state.biome_cached_at = 0
 script.state.server_replica = nil
@@ -549,13 +550,27 @@ function script.actions.fetch_merchant_stock(timeout)
     local raw_name = script.actions.get_field(result, {
         "merchant_name", "merchantName", "MerchantName", "name", "Name",
     })
+    local merchant_name = raw_name and script.actions.normalize_merchant_name(raw_name) or nil
 
-    if raw_name then
-        script.state.merchant_name = script.actions.normalize_merchant_name(raw_name)
-            or script.state.merchant_name
+    -- // a fresh name through the poll counts as a spawn (alerts + resets)
+    if merchant_name and merchant_name ~= script.state.merchant_name then
+        script.actions.mark_merchant_spawned(merchant_name)
     end
 
     script.actions.update_merchant_stock(result)
+
+    if script.state.merchant_stock then
+        script.state.merchant_empty_polls = 0
+    else
+        -- // two empty answers in a row = the merchant left
+        script.state.merchant_empty_polls = (script.state.merchant_empty_polls or 0) + 1
+
+        if script.state.merchant_name and script.state.merchant_empty_polls >= 2 then
+            print("[biome hunt] merchant gone")
+            script.state.merchant_name = nil
+            script.state.merchant_stock = nil
+        end
+    end
 end
 
 function script.actions.mark_merchant_spawned(raw_name)
@@ -633,6 +648,23 @@ function script.actions.consider_merchant_instance(instance)
     if looks_like_merchant then
         script.actions.mark_merchant_spawned(instance.Name)
     end
+end
+
+-- // authoritative merchant source on any executor: poll the game's own shop
+-- // query every few seconds — works without remote-event hooks and without
+-- // require, so low-level executors get merchants + stock the same way
+function script.actions.start_merchant_poller()
+    task.spawn(function()
+        while script.actions.script_active() do
+            executor_env.__stella_biome_hunt_heartbeat = os.time()
+
+            pcall(function()
+                script.actions.fetch_merchant_stock(6)
+            end)
+
+            task.wait(5)
+        end
+    end)
 end
 
 function script.actions.start_merchant_watcher()
@@ -1022,6 +1054,7 @@ function script.actions.run()
 
     script.actions.start_replica_loader()
     script.actions.start_merchant_watcher()
+    script.actions.start_merchant_poller()
 
     local biome = script.actions.wait_for_biome()
     local last_alerted = nil
