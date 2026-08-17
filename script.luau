@@ -682,6 +682,80 @@ function script.actions.send_webhook(payload, allow_retry)
     return true
 end
 
+-- // reads the countdown the game shows next to the biome name and renders it
+-- // as a live discord relative timestamp
+function script.actions.parse_countdown_text(text)
+    local value = tostring(text or ""):lower()
+    local total = 0
+    local matched = false
+
+    local days = tonumber(value:match("(%d+)%s*days?"))
+
+    if days then
+        total += days * 86400
+        matched = true
+    end
+
+    local h, m, s = value:match("(%d+):(%d+):(%d+)")
+
+    if h then
+        total += tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
+        matched = true
+    else
+        local mm, ss = value:match("(%d+):(%d+)")
+
+        if mm then
+            total += tonumber(mm) * 60 + tonumber(ss)
+            matched = true
+        end
+    end
+
+    if not matched then
+        return nil
+    end
+
+    return total
+end
+
+function script.actions.get_biome_timer()
+    local player_gui = local_player:FindFirstChild("PlayerGui")
+    local main_interface = player_gui and player_gui:FindFirstChild("MainInterface")
+
+    if not main_interface then
+        return nil
+    end
+
+    for _, node in ipairs(main_interface:GetDescendants()) do
+        if (node:IsA("TextLabel") or node:IsA("TextButton")) and node.Text and node.Text ~= "" then
+            local bracket = node.Text:match("^%s*%[%s*(.-)%s*%]%s*$")
+
+            if bracket and script.actions.canonical_biome(bracket) then
+                local frame = node.Parent
+
+                if not frame then
+                    return nil
+                end
+
+                local best
+
+                for _, sibling in ipairs(frame:GetDescendants()) do
+                    if sibling ~= node and sibling:IsA("TextLabel") and sibling.Text then
+                        local seconds = script.actions.parse_countdown_text(sibling.Text)
+
+                        if seconds and (not best or seconds < best) then
+                            best = seconds
+                        end
+                    end
+                end
+
+                return best
+            end
+        end
+    end
+
+    return nil
+end
+
 -- // if a merchant is around, hold the alert until its stock lands
 function script.actions.wait_for_stock(timeout)
     local deadline = os.clock() + (timeout or 10)
@@ -712,9 +786,17 @@ function script.actions.notify_biome(biome, force)
 
     script.actions.wait_for_stock(10)
 
+    local ends_line = ""
+    local remaining = script.actions.get_biome_timer()
+
+    if remaining and remaining > 0 then
+        ends_line = "**Ends:** <t:" .. tostring(os.time() + remaining) .. ":R>\n"
+    end
+
     local content = (ping_tier and "@everyone\n\n" or "")
         .. "**__Biome Hunt__**\n"
         .. "**Biome:** " .. biome .. "\n"
+        .. ends_line
         .. "**Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
 
     if script.state.merchant_name then
