@@ -3,7 +3,7 @@
 Stella biome hunter for Sol's RNG. It server-hops, reads the biome in every server, and posts Discord webhook alerts with a **Join Server** button.
 
 - posts every server's biome to your webhook with a join button
-- pings `@everyone` for **Singularity / Dreamspace / Glitched** (built in)
+- pings `@everyone` for **Singularity / Dreamspace / Glitched / Cyberspace** (built in)
 - separate **Merchant Spawned** alerts (Rin / Mari / Jester) with a join button
 - stays in a server while a rare biome or merchant is active, then hops on
 - re-queues itself after every hop and rejoin, so it keeps hunting until you stop it
