@@ -2,9 +2,9 @@
 
 Stella biome hunter for Sol's RNG. It server-hops, reads the biome in every server, and posts Discord webhook alerts with a **Join Server** button.
 
-- posts every server's biome to your webhook with a join button
+- posts every server's biome to your webhook with a join link
 - pings `@everyone` for **Singularity / Dreamspace / Glitched / Cyberspace** (built in)
-- separate **Merchant Spawned** alerts (Rin / Mari / Jester) with a join button
+- separate **Merchant Spawned** alerts (Rin / Mari / Jester) with a join link
 - stays in a server while a rare biome or merchant is active, then hops on
 - re-queues itself after every hop and rejoin, so it keeps hunting until you stop it
 
@@ -22,7 +22,7 @@ You can also just fill in the `local webhook = ""` line at the top of `main.lua`
 ## how it works
 
 1. joins a server and reads the biome (server replica → `ServerInfo` attribute → UI label)
-2. posts an embed with the biome, merchant status, and player count, plus a join button linking that exact server
+2. posts an embed with the biome, merchant status, and player count, plus a plain-text join link to that exact server
 3. if the biome is rare or a merchant is around, waits there until it's over so the join button stays useful
 4. hops to a random joinable server from the Roblox server list and repeats
 5. every hop queues `queue_on_teleport` to re-run this script from the same URL
