@@ -602,7 +602,8 @@ function script.actions.fetch_server_candidates()
 
     for _, server in ipairs(data.data) do
         if type(server) == "table" and server.id ~= game.JobId
-            and (tonumber(server.playing) or 0) < (tonumber(server.maxPlayers) or 12) then
+            and (tonumber(server.playing) or 0) >= 1
+            and (tonumber(server.playing) or 0) < (tonumber(server.maxPlayers) or 12) - 1 then
             table.insert(candidates, server.id)
         end
     end
