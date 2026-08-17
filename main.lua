@@ -15,6 +15,7 @@ local webhook = ""
 local source_url = "https://raw.githubusercontent.com/dissering/biome-hunt/main/main.lua"
 
 local webhook_username = "Stella Biome Hunt"
+local avatar_url = "https://i-am-insane.online/assets/stella-logo.png"
 local logo_url = "https://raw.githubusercontent.com/dissering/storage/main/stella/stella%20full.png"
 local biome_wait_seconds = 30
 local request_timeout_seconds = 8
@@ -506,7 +507,7 @@ end
 function script.actions.notify_biome(biome)
     local ping_tier = script.actions.is_ping_biome(biome)
 
-    local description = "**" .. biome .. "** is active in this server."
+    local description = "Biome is active in this server."
 
     if script.state.merchant_name then
         description = description .. "\n**" .. script.state.merchant_name .. "** merchant is here right now."
@@ -518,19 +519,18 @@ function script.actions.notify_biome(biome)
 
     local payload = {
         username = webhook_username,
-        avatar_url = logo_url,
+        avatar_url = avatar_url,
         embeds = { {
             title = "Biome Hunt • " .. biome,
             color = script.actions.get_biome_color(biome),
             description = description,
             fields = {
-                { name = "Biome", value = "**" .. biome .. "**", inline = true },
                 { name = "Merchant", value = script.state.merchant_name or "None", inline = true },
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
             thumbnail = { url = logo_url },
             footer = {
-                text = "Stella • Sol's RNG • visit #" .. tostring(script.state.visit_number),
+                text = "Stella • Sol's RNG",
                 icon_url = logo_url,
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
@@ -553,20 +553,19 @@ function script.actions.notify_merchant(merchant_name)
 
     local payload = {
         username = webhook_username,
-        avatar_url = logo_url,
+        avatar_url = avatar_url,
         embeds = { {
             title = "Merchant Spawned • " .. merchant_name,
             color = 0xFFD54F,
-            description = "**" .. merchant_name .. "** just spawned"
+            description = "Spawned"
                 .. (biome ~= "Unknown" and (" in a **" .. biome .. "** server") or "") .. ".",
             fields = {
-                { name = "Merchant", value = "**" .. merchant_name .. "**", inline = true },
                 { name = "Biome", value = biome, inline = true },
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
             thumbnail = { url = logo_url },
             footer = {
-                text = "Stella • Sol's RNG • visit #" .. tostring(script.state.visit_number),
+                text = "Stella • Sol's RNG",
                 icon_url = logo_url,
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
