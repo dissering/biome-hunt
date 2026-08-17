@@ -510,7 +510,7 @@ function script.actions.notify_biome(biome)
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
             footer = {
-                text = "Biome Hunt • Sol's RNG",
+                text = "Sol's RNG",
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
@@ -543,7 +543,7 @@ function script.actions.notify_merchant(merchant_name)
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
             footer = {
-                text = "Biome Hunt • Sol's RNG",
+                text = "Sol's RNG",
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
