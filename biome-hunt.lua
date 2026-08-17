@@ -9,19 +9,46 @@ local local_player = players_service.LocalPlayer
 local executor_env = type(getgenv) == "function" and getgenv() or _G
 
 local config = {
+    -- // where this script lives; used to re-queue itself after every server hop
     source_url = "https://raw.githubusercontent.com/dissering/biome-hunt/main/biome-hunt.lua",
+
+    -- // discord webhook url; set getgenv().webhook before running instead of editing this
     webhook_url = "",
+
+    -- // username shown on the webhook messages
     webhook_username = "Stella Biome Hunt",
+
+    -- // webhook avatar + embed thumbnail image
     logo_url = "https://raw.githubusercontent.com/dissering/storage/main/stella/stella%20full.png",
+
+    -- // biomes that ping @everyone
     ping_everyone_biomes = { "Singularity", "Dreamspace", "Glitched" },
+
+    -- // true = post every server's biome; false = only notable biomes and merchants
     report_all_servers = true,
+
+    -- // stay in the server while a notable biome is active so the join button keeps working
     stay_on_rare = true,
+
+    -- // stay in the server while a merchant is active
     stay_on_merchant = true,
+
+    -- // optional user id to mention when a merchant spawns, e.g. "12345678"
     merchant_mention_user_id = "",
+
+    -- // skip hop targets with fewer players than this
     min_server_players = 0,
+
+    -- // random wait range in seconds between the report and the hop
     settle_delay_range = { 3, 5 },
+
+    -- // max seconds to stay in one server for a rare biome or merchant
     stay_cap_seconds = 300,
+
+    -- // max seconds to wait for biome detection after joining a server
     biome_wait_seconds = 30,
+
+    -- // abandon http requests (webhook + server list) after this many seconds
     request_timeout_seconds = 8,
 }
 
@@ -39,6 +66,7 @@ if type(stored_webhook) == "string" and stored_webhook ~= "" then
     config.webhook_url = stored_webhook
 end
 
+-- // every biome the hunter recognizes; unrecognized names get reported but never trigger a stay
 local all_biomes = {
     "Normal", "Rainy", "Snowy", "Windy", "SandStorm",
     "Dreamspace", "Glitched", "Blood Rain", "RedFullMoon", "Aurora",
@@ -46,8 +74,10 @@ local all_biomes = {
     "Heaven", "Corrupt", "Corruption", "Blazing Sun",
 }
 
+-- // everyday weather biomes: reported (if report_all_servers) but never worth staying for
 local common_biomes = { "Normal", "Rainy", "Snowy", "Windy", "SandStorm" }
 
+-- // embed color per biome; anything unlisted falls back to soft blue
 local biome_colors = {
     Dreamspace = 0x7C4DFF,
     Glitched = 0x00E676,
