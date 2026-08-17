@@ -439,18 +439,6 @@ function script.actions.get_server_join_link(job_id)
         .. "&gameInstanceId=" .. tostring(job_id or game.JobId)
 end
 
-function script.actions.get_join_button(job_id)
-    return { {
-        type = 1,
-        components = { {
-            type = 2,
-            style = 5,
-            label = "Join Server",
-            url = script.actions.get_server_join_link(job_id),
-        } },
-    } }
-end
-
 function script.actions.get_players_field()
     return tostring(#players_service:GetPlayers())
 end
@@ -474,12 +462,6 @@ function script.actions.send_webhook(payload, allow_retry)
     end
 
     local status = tonumber(response.StatusCode) or 0
-
-    if status == 400 and payload.components and allow_retry ~= false then
-        payload.components = nil
-
-        return script.actions.send_webhook(payload, false)
-    end
 
     if status == 429 and allow_retry ~= false then
         local retry_after = 3
@@ -517,6 +499,8 @@ function script.actions.notify_biome(biome)
         description = description .. "\nRare biome — join before it ends!"
     end
 
+    description = description .. "\nJoin: " .. script.actions.get_server_join_link(game.JobId)
+
     local payload = {
         username = webhook_username,
         avatar_url = avatar_url,
@@ -535,7 +519,6 @@ function script.actions.notify_biome(biome)
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
-        components = script.actions.get_join_button(game.JobId),
     }
 
     if ping_tier then
@@ -550,6 +533,9 @@ end
 
 function script.actions.notify_merchant(merchant_name)
     local biome = script.actions.get_current_biome()
+    local description = "Spawned"
+        .. (biome ~= "Unknown" and (" in a **" .. biome .. "** server") or "") .. "."
+        .. "\nJoin: " .. script.actions.get_server_join_link(game.JobId)
 
     local payload = {
         username = webhook_username,
@@ -557,8 +543,7 @@ function script.actions.notify_merchant(merchant_name)
         embeds = { {
             title = "Merchant Spawned • " .. merchant_name,
             color = 0xFFD54F,
-            description = "Spawned"
-                .. (biome ~= "Unknown" and (" in a **" .. biome .. "** server") or "") .. ".",
+            description = description,
             fields = {
                 { name = "Biome", value = biome, inline = true },
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
@@ -570,7 +555,6 @@ function script.actions.notify_merchant(merchant_name)
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
-        components = script.actions.get_join_button(game.JobId),
     }
 
     local delivered = script.actions.send_webhook(payload, true)
@@ -636,7 +620,9 @@ function script.actions.queue_rejoin()
 
     local queued_source = 'if not game:IsLoaded() then game.Loaded:Wait() end '
         .. 'print("[stella biome hunt] rejoin loader fired") '
-        .. 'loadstring(game:HttpGet("' .. source_url .. '"))()'
+        .. 'local ok, err = pcall(function() '
+        .. 'loadstring(game:HttpGet("' .. source_url .. '"))() end) '
+        .. 'if not ok then print("[stella biome hunt] rejoin loader failed: " .. tostring(err)) end'
 
     local ok = pcall(queue_function, queued_source)
 
