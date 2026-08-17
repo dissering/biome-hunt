@@ -723,7 +723,7 @@ function script.actions.notify_biome(biome, force)
 
     content = content
         .. "**Players:** " .. script.actions.get_players_field() .. "\n"
-        .. "**Join:** [Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
+        .. "[Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
         .. "-# Sol's RNG • biome hunt"
 
     local payload = {
