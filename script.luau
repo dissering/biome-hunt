@@ -503,6 +503,61 @@ function script.actions.update_merchant_stock(...)
     script.state.merchant_stock = script.actions.format_stock_text(records)
 end
 
+function script.actions.get_merchant_remote(name)
+    local remote_root = replicated_storage:FindFirstChild("Remote")
+    local merchant_root = remote_root and remote_root:FindFirstChild("Merchant")
+
+    return merchant_root and merchant_root:FindFirstChild(name) or nil
+end
+
+-- // stock is served by the GetAllMerchantInfo RemoteFunction -- the same
+-- // read the merchant window performs; InvokeServer can hang on some
+-- // executors (xeno etc) so it runs on its own thread with a deadline
+function script.actions.fetch_merchant_stock(timeout)
+    local info_remote = script.actions.get_merchant_remote("GetAllMerchantInfo")
+
+    if not info_remote or not info_remote:IsA("RemoteFunction") then
+        return
+    end
+
+    local finished = false
+    local result = nil
+
+    task.spawn(function()
+        local ok, call_result = pcall(function()
+            return info_remote:InvokeServer()
+        end)
+
+        if ok then
+            result = call_result
+        end
+
+        finished = true
+    end)
+
+    local deadline = os.clock() + (timeout or 8)
+
+    while not finished and os.clock() < deadline do
+        task.wait(0.1)
+    end
+
+    if type(result) ~= "table" then
+        print("[biome hunt] merchant stock fetch returned nothing")
+        return
+    end
+
+    local raw_name = script.actions.get_field(result, {
+        "merchant_name", "merchantName", "MerchantName", "name", "Name",
+    })
+
+    if raw_name then
+        script.state.merchant_name = script.actions.normalize_merchant_name(raw_name)
+            or script.state.merchant_name
+    end
+
+    script.actions.update_merchant_stock(result)
+end
+
 function script.actions.mark_merchant_spawned(raw_name)
     local merchant_name = script.actions.normalize_merchant_name(raw_name)
         or script.state.merchant_name or "Unknown merchant"
@@ -593,7 +648,9 @@ function script.actions.start_merchant_watcher()
                 for _, event_name in ipairs({ "MerchantSpawned", "MerchantOpened", "FetchProducts", "ProductQuantityUpdated", "MerchantDespawned" }) do
                     local event = merchant_root:FindFirstChild(event_name)
 
-                    if event and event:IsA("RemoteEvent") and not bound[event] then
+                    -- // bind anything with OnClientEvent -- low-level executors
+                    -- // can misreport IsA, and a pcall Connect covers the rest
+                    if event and not bound[event] then
                         local ok, connection = pcall(function()
                             return event.OnClientEvent:Connect(function(...)
                                 script.actions.handle_merchant_remote(event_name, ...)
@@ -687,13 +744,23 @@ function script.actions.send_webhook(payload, allow_retry)
     return true
 end
 
--- // if a merchant is around, hold the alert until its stock lands
+-- // if a merchant is around, hold the alert until its stock lands; kicks the
+-- // GetAllMerchantInfo fetch since the game never pushes stock on its own
 function script.actions.wait_for_stock(timeout)
     local deadline = os.clock() + (timeout or 10)
+    local fetch_started = false
 
     while os.clock() < deadline and script.actions.script_active() do
         if script.state.merchant_name == nil or script.state.merchant_stock ~= nil then
             return
+        end
+
+        if not fetch_started then
+            fetch_started = true
+
+            task.spawn(function()
+                script.actions.fetch_merchant_stock(8)
+            end)
         end
 
         executor_env.__stella_biome_hunt_heartbeat = os.time()
