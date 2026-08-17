@@ -24,34 +24,21 @@ if type(stored_webhook) == "string" and stored_webhook ~= "" then
     webhook = stored_webhook
 end
 
--- // every biome the hunter recognizes; unrecognized names get reported but never trigger a stay
+-- // double execution protection: a live hunt updates this heartbeat, so a
+-- // second execution inside the window stops itself instead of doubling up
+local last_heartbeat = tonumber(executor_env.__stella_biome_hunt_heartbeat) or 0
+
+if os.time() - last_heartbeat < 30 then
+    print("[biome hunt] already running — stopping this extra execution")
+    return
+end
+
+-- // every biome the hunter recognizes; unrecognized names still get reported
 local all_biomes = {
     "Normal", "Rainy", "Snowy", "Windy", "SandStorm",
     "Dreamspace", "Glitched", "Blood Rain", "RedFullMoon", "Aurora",
     "Starfall", "Singularity", "RadiantForest", "Hell", "Null",
     "Heaven", "Corrupt", "Corruption", "Blazing Sun", "Cyberspace",
-}
-
--- // everyday weather biomes: reported but never worth staying for
-local common_biomes = { "Normal", "Rainy", "Snowy", "Windy", "SandStorm" }
-
--- // embed color per biome; anything unlisted falls back to soft blue
-local biome_colors = {
-    Dreamspace = 0x7C4DFF,
-    Glitched = 0x00E676,
-    Singularity = 0xFFFFFF,
-    Aurora = 0x00E5FF,
-    Starfall = 0xFFD180,
-    ["Blood Rain"] = 0xC62828,
-    RedFullMoon = 0xD32F2F,
-    Null = 0x37474F,
-    Hell = 0xFF7043,
-    Heaven = 0xFAFAFA,
-    Corrupt = 0x8E24AA,
-    Corruption = 0x8E24AA,
-    RadiantForest = 0x66BB6A,
-    ["Blazing Sun"] = 0xFFB300,
-    Cyberspace = 0xFF40C8,
 }
 
 local generation = (tonumber(_G.__stella_biome_hunt_generation) or 0) + 1
@@ -65,6 +52,8 @@ script.state.merchant_seen_at = {}
 script.state.biome_cached = nil
 script.state.biome_cached_at = 0
 script.state.server_replica = nil
+script.state.last_alert_biome = nil
+script.state.last_alert_at = 0
 
 function script.actions.script_active()
     return _G.__stella_biome_hunt_generation == generation
@@ -267,26 +256,6 @@ function script.actions.is_ping_biome(biome)
         or key == "glitched" or key == "cyberspace"
 end
 
-function script.actions.is_stay_biome(biome)
-    if script.actions.canonical_biome(biome) == nil then
-        return false
-    end
-
-    local key = script.actions.biome_key(biome)
-
-    for _, common in ipairs(common_biomes) do
-        if script.actions.biome_key(common) == key then
-            return false
-        end
-    end
-
-    return true
-end
-
-function script.actions.get_biome_color(biome)
-    return biome_colors[script.actions.canonical_biome(biome) or tostring(biome)] or 0x4FC3F7
-end
-
 function script.actions.normalize_merchant_name(value)
     local key = script.actions.compact_text(value)
 
@@ -427,6 +396,10 @@ function script.actions.start_merchant_watcher()
     end
 
     workspace.ChildAdded:Connect(function(child)
+        if not script.actions.script_active() then
+            return
+        end
+
         task.wait(0.5)
         script.actions.consider_merchant_instance(child)
     end)
@@ -487,37 +460,30 @@ end
 function script.actions.notify_biome(biome)
     local ping_tier = script.actions.is_ping_biome(biome)
 
-    local description = "**" .. biome .. "** is active in this server."
-
-    if script.state.merchant_name then
-        description = description .. "\n**" .. script.state.merchant_name .. "** merchant is here right now."
+    -- // dedupe: never post the same biome twice within 30 seconds
+    if script.state.last_alert_biome == biome
+        and os.clock() - script.state.last_alert_at < 30 then
+        return
     end
 
-    if ping_tier then
-        description = description .. "\nRare biome — join before it ends!"
-    end
+    script.state.last_alert_biome = biome
+    script.state.last_alert_at = os.clock()
 
-    description = description .. "\nJoin: " .. script.actions.get_server_join_link(game.JobId)
+    local content = (ping_tier and "@everyone\n\n" or "")
+        .. "**__Biome Hunt__**\n"
+        .. "> **Biome:** " .. biome .. "\n"
+        .. "> **Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
+        .. "> **Players:** " .. script.actions.get_players_field() .. "\n"
+        .. "> **Join:** " .. script.actions.get_server_join_link(game.JobId) .. "\n"
+        .. "-# Sol's RNG • biome hunt"
 
     local payload = {
         username = webhook_username,
-        embeds = { {
-            title = "Biome Hunt",
-            color = script.actions.get_biome_color(biome),
-            description = description,
-            fields = {
-                { name = "Merchant", value = script.state.merchant_name or "None", inline = true },
-                { name = "Players", value = script.actions.get_players_field(), inline = true },
-            },
-            footer = {
-                text = "Sol's RNG",
-            },
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        } },
+        content = content,
+        flags = 4,
     }
 
     if ping_tier then
-        payload.content = "@everyone"
         payload.allowed_mentions = { parse = { "everyone" } }
     end
 
@@ -528,25 +494,18 @@ end
 
 function script.actions.notify_merchant(merchant_name)
     local biome = script.actions.get_current_biome()
-    local description = "Spawned"
-        .. (biome ~= "Unknown" and (" in a **" .. biome .. "** server") or "") .. "."
-        .. "\nJoin: " .. script.actions.get_server_join_link(game.JobId)
+
+    local content = "**__Merchant Spawned__**\n"
+        .. "> **Merchant:** " .. merchant_name .. "\n"
+        .. "> **Biome:** " .. (biome ~= "Unknown" and biome or "?") .. "\n"
+        .. "> **Players:** " .. script.actions.get_players_field() .. "\n"
+        .. "> **Join:** " .. script.actions.get_server_join_link(game.JobId) .. "\n"
+        .. "-# Sol's RNG • biome hunt"
 
     local payload = {
         username = webhook_username,
-        embeds = { {
-            title = "Merchant Spawned • " .. merchant_name,
-            color = 0xFFD54F,
-            description = description,
-            fields = {
-                { name = "Biome", value = biome, inline = true },
-                { name = "Players", value = script.actions.get_players_field(), inline = true },
-            },
-            footer = {
-                text = "Sol's RNG",
-            },
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        } },
+        content = content,
+        flags = 4,
     }
 
     local delivered = script.actions.send_webhook(payload, true)
@@ -627,6 +586,7 @@ function script.actions.queue_rejoin()
 
     local queued_source = 'if not game:IsLoaded() then game.Loaded:Wait() end '
         .. 'print("[biome hunt] rejoin loader fired") '
+        .. 'pcall(function() getgenv().__stella_biome_hunt_heartbeat = 0 end) '
         .. 'local ok, err = pcall(function() '
         .. 'loadstring(game:HttpGet("' .. source_url .. '"))() end) '
         .. 'if not ok then print("[biome hunt] rejoin loader failed: " .. tostring(err)) end'
@@ -683,6 +643,8 @@ function script.actions.wait_for_biome(timeout)
     local deadline = os.clock() + (timeout or biome_wait_seconds)
 
     while os.clock() < deadline and script.actions.script_active() do
+        executor_env.__stella_biome_hunt_heartbeat = os.time()
+
         local biome = script.actions.get_current_biome()
 
         if biome ~= "Unknown" then
@@ -695,36 +657,6 @@ function script.actions.wait_for_biome(timeout)
 
     print("[biome hunt] biome not detected — hopping anyway")
     return "Unknown"
-end
-
-function script.actions.stay_while_special(start_biome)
-    local biome = start_biome
-
-    print("[biome hunt] staying in server for " .. biome
-        .. (script.state.merchant_name and " + merchant" or ""))
-
-    while script.actions.script_active() do
-        task.wait(1)
-
-        local latest = script.actions.get_current_biome()
-
-        if latest ~= "Unknown" and latest ~= biome then
-            biome = latest
-            script.actions.notify_biome(biome)
-        end
-
-        local special_biome = script.actions.is_ping_biome(biome)
-            or script.actions.is_stay_biome(biome)
-
-        if not special_biome and script.state.merchant_name == nil then
-            break
-        end
-    end
-
-    print("[biome hunt] stay finished — hopping on")
-    script.actions.settle_wait()
-
-    return script.actions.get_current_biome()
 end
 
 function script.actions.looks_like_sols()
@@ -770,6 +702,8 @@ function script.actions.run()
     local last_alerted = nil
 
     while script.actions.script_active() do
+        executor_env.__stella_biome_hunt_heartbeat = os.time()
+
         local current = script.actions.get_current_biome()
 
         if current ~= "Unknown" then
@@ -781,19 +715,10 @@ function script.actions.run()
             last_alerted = biome
         end
 
-        local should_stay = script.actions.is_ping_biome(biome)
-            or script.actions.is_stay_biome(biome)
-            or script.state.merchant_name ~= nil
-
         print("[biome hunt] cycle: biome=" .. tostring(biome)
-            .. " merchant=" .. tostring(script.state.merchant_name or "none")
-            .. " stay=" .. tostring(should_stay))
+            .. " merchant=" .. tostring(script.state.merchant_name or "none"))
 
-        if should_stay then
-            biome = script.actions.stay_while_special(biome)
-        else
-            script.actions.settle_wait()
-        end
+        script.actions.settle_wait()
 
         if script.actions.script_active() then
             script.actions.hop()
