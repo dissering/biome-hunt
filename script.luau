@@ -50,6 +50,8 @@ executor_env.__stella_biome_hunt_visits = script.state.visit_number
 script.state.merchant_name = nil
 script.state.merchant_stock = nil
 script.state.merchant_seen_at = {}
+script.state.merchant_spawn_at = nil
+script.state.merchant_ends_at = nil
 script.state.biome_cached = nil
 script.state.biome_cached_at = 0
 script.state.server_replica = nil
@@ -512,6 +514,8 @@ function script.actions.mark_merchant_spawned(raw_name)
 
     script.state.merchant_seen_at[key] = now
     script.state.merchant_stock = nil
+    script.state.merchant_spawn_at = os.time()
+    script.state.merchant_ends_at = nil
 
     -- // merchant spawns re-send the one combined alert (never a second
     -- // message type); notify_biome itself waits for the stock to land
@@ -530,14 +534,27 @@ end
 
 function script.actions.handle_merchant_remote(event_name, ...)
     if event_name == "MerchantDespawned" then
+        script.actions.learn_merchant_duration()
         script.state.merchant_name = nil
         script.state.merchant_stock = nil
+        script.state.merchant_spawn_at = nil
+        script.state.merchant_ends_at = nil
         return
     end
 
     script.actions.update_merchant_stock(...)
 
     local arguments = table.pack(...)
+
+    for index = 1, arguments.n do
+        if type(arguments[index]) == "table" then
+            local ends_at = script.actions.scan_merchant_end_time(arguments[index], 0)
+
+            if ends_at then
+                script.state.merchant_ends_at = ends_at
+            end
+        end
+    end
     local raw_name = script.actions.parse_merchant_name(arguments[1])
 
     for index = 2, arguments.n do
@@ -571,6 +588,16 @@ function script.actions.consider_merchant_instance(instance)
         or key:match("^rin") or key:match("^mari") or key:match("^jester")
 
     if looks_like_merchant then
+        pcall(function()
+            for key, value in pairs(instance:GetAttributes()) do
+                local ends_at = script.actions.scan_merchant_end_time({ [key] = value }, 0)
+
+                if ends_at then
+                    script.state.merchant_ends_at = ends_at
+                end
+            end
+        end)
+
         script.actions.mark_merchant_spawned(instance.Name)
     end
 end
@@ -682,74 +709,83 @@ function script.actions.send_webhook(payload, allow_retry)
     return true
 end
 
--- // reads the countdown the game shows next to the biome name and renders it
--- // as a live discord relative timestamp
-function script.actions.parse_countdown_text(text)
-    local value = tostring(text or ""):lower()
-    local total = 0
-    local matched = false
-
-    local days = tonumber(value:match("(%d+)%s*days?"))
-
-    if days then
-        total += days * 86400
-        matched = true
+-- // reads: merchant timers -- the game does not expose a despawn time in the
+-- // known remote fields, so: use an end/duration field if one arrives, else
+-- // the model attributes, else the learned stay length per merchant
+function script.actions.scan_merchant_end_time(payload, depth)
+    if type(payload) ~= "table" or (tonumber(depth) or 0) > 4 then
+        return nil
     end
 
-    local h, m, s = value:match("(%d+):(%d+):(%d+)")
+    local now = os.time()
 
-    if h then
-        total += tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
-        matched = true
-    else
-        local mm, ss = value:match("(%d+):(%d+)")
+    for _, field_name in ipairs({ "EndTime", "endTime", "DespawnAt", "despawnAt", "ExpiresAt", "expiresAt", "LeavesAt", "leavesAt" }) do
+        local value = tonumber(payload[field_name])
 
-        if mm then
-            total += tonumber(mm) * 60 + tonumber(ss)
-            matched = true
+        if value and value > now and value < now + 86400 then
+            return value
         end
     end
 
-    if not matched then
-        return nil
+    for _, field_name in ipairs({ "Duration", "duration", "TimeLeft", "timeLeft", "Lifetime", "lifetime", "RemainingTime", "remainingTime" }) do
+        local value = tonumber(payload[field_name])
+
+        if value and value >= 10 and value <= 86400 then
+            return now + value
+        end
     end
 
-    return total
+    for _, nested in pairs(payload) do
+        if type(nested) == "table" then
+            local found = script.actions.scan_merchant_end_time(nested, (tonumber(depth) or 0) + 1)
+
+            if found then
+                return found
+            end
+        end
+    end
+
+    return nil
 end
 
-function script.actions.get_biome_timer()
-    local player_gui = local_player:FindFirstChild("PlayerGui")
-    local main_interface = player_gui and player_gui:FindFirstChild("MainInterface")
+function script.actions.learn_merchant_duration()
+    local name = script.state.merchant_name
+    local spawn_at = script.state.merchant_spawn_at
 
-    if not main_interface then
+    if not name or not spawn_at then
+        return
+    end
+
+    local observed = os.time() - spawn_at
+
+    if observed < 30 or observed > 86400 then
+        return
+    end
+
+    if type(executor_env.__biome_hunt_merchant_durations) ~= "table" then
+        executor_env.__biome_hunt_merchant_durations = {}
+    end
+
+    executor_env.__biome_hunt_merchant_durations[script.actions.compact_text(name)] = observed
+
+    print("[biome hunt] learned " .. name .. " stays about " .. tostring(math.floor(observed / 60)) .. " minutes")
+end
+
+function script.actions.get_merchant_leaves_at()
+    if not script.state.merchant_name then
         return nil
     end
 
-    for _, node in ipairs(main_interface:GetDescendants()) do
-        if (node:IsA("TextLabel") or node:IsA("TextButton")) and node.Text and node.Text ~= "" then
-            local bracket = node.Text:match("^%s*%[%s*(.-)%s*%]%s*$")
+    if script.state.merchant_ends_at and script.state.merchant_ends_at > os.time() then
+        return script.state.merchant_ends_at
+    end
 
-            if bracket and script.actions.canonical_biome(bracket) then
-                local frame = node.Parent
+    if script.state.merchant_spawn_at then
+        local learned = executor_env.__biome_hunt_merchant_durations
+            and executor_env.__biome_hunt_merchant_durations[script.actions.compact_text(script.state.merchant_name)]
 
-                if not frame then
-                    return nil
-                end
-
-                local best
-
-                for _, sibling in ipairs(frame:GetDescendants()) do
-                    if sibling ~= node and sibling:IsA("TextLabel") and sibling.Text then
-                        local seconds = script.actions.parse_countdown_text(sibling.Text)
-
-                        if seconds and (not best or seconds < best) then
-                            best = seconds
-                        end
-                    end
-                end
-
-                return best
-            end
+        if learned then
+            return script.state.merchant_spawn_at + learned
         end
     end
 
@@ -786,21 +822,21 @@ function script.actions.notify_biome(biome, force)
 
     script.actions.wait_for_stock(10)
 
-    local ends_line = ""
-    local remaining = script.actions.get_biome_timer()
+    local leaves_line = ""
+    local leaves_at = script.actions.get_merchant_leaves_at()
 
-    if remaining and remaining > 0 then
-        ends_line = "**Ends:** <t:" .. tostring(os.time() + remaining) .. ":R>\n"
+    if leaves_at then
+        leaves_line = "**Leaves:** <t:" .. tostring(leaves_at) .. ":R>\n"
     end
 
     local content = (ping_tier and "@everyone\n\n" or "")
         .. "**__Biome Hunt__**\n"
         .. "**Biome:** " .. biome .. "\n"
-        .. ends_line
         .. "**Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
 
     if script.state.merchant_name then
         content = content .. "**Stock:** " .. (script.state.merchant_stock or "unknown") .. "\n"
+        content = content .. leaves_line
     end
 
     content = content
