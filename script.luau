@@ -14,9 +14,7 @@ local webhook = ""
 -- // where this script lives; used to re-queue itself after every server hop
 local source_url = "https://raw.githubusercontent.com/dissering/biome-hunt/main/script.luau"
 
-local webhook_username = "Stella Biome Hunt"
-local avatar_url = "https://i-am-insane.online/assets/stella-logo.png"
-local logo_url = "https://raw.githubusercontent.com/dissering/storage/main/stella/stella%20full.png"
+local webhook_username = "Biome Hunt"
 local biome_wait_seconds = 30
 local request_timeout_seconds = 8
 
@@ -445,7 +443,7 @@ end
 
 function script.actions.send_webhook(payload, allow_retry)
     if webhook == "" then
-        print("[stella biome hunt] no webhook url set (getgenv().webhook) — skipping alert")
+        print("[biome hunt] no webhook url set (getgenv().webhook) — skipping alert")
         return false
     end
 
@@ -457,7 +455,7 @@ function script.actions.send_webhook(payload, allow_retry)
     })
 
     if not ok or type(response) ~= "table" then
-        print("[stella biome hunt] webhook request failed or timed out")
+        print("[biome hunt] webhook request failed or timed out")
         return false
     end
 
@@ -472,14 +470,14 @@ function script.actions.send_webhook(payload, allow_retry)
             retry_after = math.min(30, tonumber(decoded.retry_after) or 3)
         end)
 
-        print("[stella biome hunt] webhook rate limited, retrying in " .. tostring(retry_after) .. "s")
+        print("[biome hunt] webhook rate limited, retrying in " .. tostring(retry_after) .. "s")
         task.wait(retry_after + 1)
 
         return script.actions.send_webhook(payload, false)
     end
 
     if status < 200 or status >= 300 then
-        print("[stella biome hunt] webhook status " .. tostring(status) .. " " .. tostring(response.Body):sub(1, 120))
+        print("[biome hunt] webhook status " .. tostring(status) .. " " .. tostring(response.Body):sub(1, 120))
         return false
     end
 
@@ -503,7 +501,6 @@ function script.actions.notify_biome(biome)
 
     local payload = {
         username = webhook_username,
-        avatar_url = avatar_url,
         embeds = { {
             title = "Biome Hunt • " .. biome,
             color = script.actions.get_biome_color(biome),
@@ -512,10 +509,8 @@ function script.actions.notify_biome(biome)
                 { name = "Merchant", value = script.state.merchant_name or "None", inline = true },
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
-            thumbnail = { url = logo_url },
             footer = {
-                text = "Stella • Sol's RNG",
-                icon_url = logo_url,
+                text = "Biome Hunt • Sol's RNG",
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
@@ -528,7 +523,7 @@ function script.actions.notify_biome(biome)
 
     local delivered = script.actions.send_webhook(payload, true)
 
-    print("[stella biome hunt] biome " .. biome .. (delivered and " reported" or " report failed"))
+    print("[biome hunt] biome " .. biome .. (delivered and " reported" or " report failed"))
 end
 
 function script.actions.notify_merchant(merchant_name)
@@ -539,7 +534,6 @@ function script.actions.notify_merchant(merchant_name)
 
     local payload = {
         username = webhook_username,
-        avatar_url = avatar_url,
         embeds = { {
             title = "Merchant Spawned • " .. merchant_name,
             color = 0xFFD54F,
@@ -548,10 +542,8 @@ function script.actions.notify_merchant(merchant_name)
                 { name = "Biome", value = biome, inline = true },
                 { name = "Players", value = script.actions.get_players_field(), inline = true },
             },
-            thumbnail = { url = logo_url },
             footer = {
-                text = "Stella • Sol's RNG",
-                icon_url = logo_url,
+                text = "Biome Hunt • Sol's RNG",
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         } },
@@ -559,14 +551,14 @@ function script.actions.notify_merchant(merchant_name)
 
     local delivered = script.actions.send_webhook(payload, true)
 
-    print("[stella biome hunt] merchant " .. merchant_name .. (delivered and " reported" or " report failed"))
+    print("[biome hunt] merchant " .. merchant_name .. (delivered and " reported" or " report failed"))
 end
 
 function script.actions.fetch_server_candidates()
     local request_function = script.actions.get_request_function()
 
     if not request_function then
-        print("[stella biome hunt] no http request function — using matchmaking fallback")
+        print("[biome hunt] no http request function — using matchmaking fallback")
         return {}
     end
 
@@ -577,7 +569,7 @@ function script.actions.fetch_server_candidates()
     local ok, response = script.actions.request_with_timeout({ Url = url, Method = "GET" })
 
     if not ok then
-        print("[stella biome hunt] server list request failed or timed out — using matchmaking fallback")
+        print("[biome hunt] server list request failed or timed out — using matchmaking fallback")
         return {}
     end
 
@@ -585,7 +577,7 @@ function script.actions.fetch_server_candidates()
         local status = type(response) == "table" and tostring(response.StatusCode) or "?"
         local body = type(response) == "table" and tostring(response.Body):sub(1, 120) or ""
 
-        print("[stella biome hunt] server list status " .. status .. " " .. body)
+        print("[biome hunt] server list status " .. status .. " " .. body)
         return {}
     end
 
@@ -594,7 +586,7 @@ function script.actions.fetch_server_candidates()
     end)
 
     if not ok_decode or type(data) ~= "table" or type(data.data) ~= "table" then
-        print("[stella biome hunt] server list response unparsable")
+        print("[biome hunt] server list response unparsable")
         return {}
     end
 
@@ -629,26 +621,26 @@ function script.actions.queue_rejoin()
     local queue_function = script.actions.get_queue_function()
 
     if not queue_function then
-        print("[stella biome hunt] queue_on_teleport unavailable — hunting stops at this hop")
+        print("[biome hunt] queue_on_teleport unavailable — hunting stops at this hop")
         return
     end
 
     local queued_source = 'if not game:IsLoaded() then game.Loaded:Wait() end '
-        .. 'print("[stella biome hunt] rejoin loader fired") '
+        .. 'print("[biome hunt] rejoin loader fired") '
         .. 'local ok, err = pcall(function() '
         .. 'loadstring(game:HttpGet("' .. source_url .. '"))() end) '
-        .. 'if not ok then print("[stella biome hunt] rejoin loader failed: " .. tostring(err)) end'
+        .. 'if not ok then print("[biome hunt] rejoin loader failed: " .. tostring(err)) end'
 
     local ok = pcall(queue_function, queued_source)
 
-    print("[stella biome hunt] rejoin queue " .. (ok and "armed" or "failed"))
+    print("[biome hunt] rejoin queue " .. (ok and "armed" or "failed"))
 end
 
 function script.actions.hop()
     script.actions.queue_rejoin()
 
     local candidates = script.actions.fetch_server_candidates()
-    print("[stella biome hunt] hopping: " .. tostring(#candidates) .. " candidate servers")
+    print("[biome hunt] hopping: " .. tostring(#candidates) .. " candidate servers")
 
     for attempt = 1, 3 do
         if #candidates == 0 then
@@ -661,13 +653,13 @@ function script.actions.hop()
         end)
 
         if ok then
-            print("[stella biome hunt] teleport requested to " .. target_job_id)
+            print("[biome hunt] teleport requested to " .. target_job_id)
 
             task.wait(12)
             return true
         end
 
-        print("[stella biome hunt] teleport attempt " .. tostring(attempt) .. " failed: " .. tostring(err))
+        print("[biome hunt] teleport attempt " .. tostring(attempt) .. " failed: " .. tostring(err))
         task.wait(2)
     end
 
@@ -676,12 +668,12 @@ function script.actions.hop()
     end)
 
     if ok then
-        print("[stella biome hunt] fallback teleport requested")
+        print("[biome hunt] fallback teleport requested")
         task.wait(12)
         return true
     end
 
-    print("[stella biome hunt] fallback teleport failed: " .. tostring(err) .. " — retrying soon")
+    print("[biome hunt] fallback teleport failed: " .. tostring(err) .. " — retrying soon")
     task.wait(5)
 
     return false
@@ -694,21 +686,21 @@ function script.actions.wait_for_biome(timeout)
         local biome = script.actions.get_current_biome()
 
         if biome ~= "Unknown" then
-            print("[stella biome hunt] biome detected: " .. biome)
+            print("[biome hunt] biome detected: " .. biome)
             return biome
         end
 
         task.wait(0.75)
     end
 
-    print("[stella biome hunt] biome not detected — hopping anyway")
+    print("[biome hunt] biome not detected — hopping anyway")
     return "Unknown"
 end
 
 function script.actions.stay_while_special(start_biome)
     local biome = start_biome
 
-    print("[stella biome hunt] staying in server for " .. biome
+    print("[biome hunt] staying in server for " .. biome
         .. (script.state.merchant_name and " + merchant" or ""))
 
     while script.actions.script_active() do
@@ -729,7 +721,7 @@ function script.actions.stay_while_special(start_biome)
         end
     end
 
-    print("[stella biome hunt] stay finished — hopping on")
+    print("[biome hunt] stay finished — hopping on")
     script.actions.settle_wait()
 
     return script.actions.get_current_biome()
@@ -760,13 +752,13 @@ function script.actions.run()
         game.Loaded:Wait()
     end
 
-    print("[stella biome hunt] starting (visit #" .. tostring(script.state.visit_number) .. ")")
+    print("[biome hunt] starting (visit #" .. tostring(script.state.visit_number) .. ")")
 
     if not script.actions.looks_like_sols() then
         task.wait(8)
 
         if not script.actions.looks_like_sols() then
-            print("[stella biome hunt] this does not look like Sol's RNG — stopping")
+            print("[biome hunt] this does not look like Sol's RNG — stopping")
             return
         end
     end
@@ -793,7 +785,7 @@ function script.actions.run()
             or script.actions.is_stay_biome(biome)
             or script.state.merchant_name ~= nil
 
-        print("[stella biome hunt] cycle: biome=" .. tostring(biome)
+        print("[biome hunt] cycle: biome=" .. tostring(biome)
             .. " merchant=" .. tostring(script.state.merchant_name or "none")
             .. " stay=" .. tostring(should_stay))
 
