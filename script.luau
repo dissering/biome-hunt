@@ -513,8 +513,9 @@ function script.actions.mark_merchant_spawned(raw_name)
     script.state.merchant_seen_at[key] = now
     script.state.merchant_stock = nil
 
-    -- // give the stock remotes a moment to land before posting the alert
-    task.delay(2.5, function()
+    -- // merchant spawns re-send the one combined alert (never a second
+    -- // message type); notify_biome itself waits for the stock to land
+    task.delay(1, function()
         if not script.actions.script_active() then
             return
         end
@@ -523,7 +524,7 @@ function script.actions.mark_merchant_spawned(raw_name)
             return
         end
 
-        script.actions.notify_merchant(merchant_name)
+        script.actions.notify_biome(script.actions.get_current_biome(), true)
     end)
 end
 
@@ -681,29 +682,46 @@ function script.actions.send_webhook(payload, allow_retry)
     return true
 end
 
-function script.actions.notify_biome(biome)
+-- // if a merchant is around, hold the alert until its stock lands
+function script.actions.wait_for_stock(timeout)
+    local deadline = os.clock() + (timeout or 10)
+
+    while os.clock() < deadline and script.actions.script_active() do
+        if script.state.merchant_name == nil or script.state.merchant_stock ~= nil then
+            return
+        end
+
+        executor_env.__stella_biome_hunt_heartbeat = os.time()
+        task.wait(0.5)
+    end
+end
+
+function script.actions.notify_biome(biome, force)
     local ping_tier = script.actions.is_ping_biome(biome)
 
-    -- // dedupe: never post the same biome twice within 30 seconds
-    if script.state.last_alert_biome == biome
-        and os.clock() - script.state.last_alert_at < 30 then
-        return
+    if not force then
+        -- // dedupe: never post the same biome twice within 30 seconds
+        if script.state.last_alert_biome == biome
+            and os.clock() - script.state.last_alert_at < 30 then
+            return
+        end
     end
 
     script.state.last_alert_biome = biome
     script.state.last_alert_at = os.clock()
 
-    local stock_line = ""
-
-    if script.state.merchant_name and script.state.merchant_stock then
-        stock_line = "**Stock:** " .. script.state.merchant_stock .. "\n"
-    end
+    script.actions.wait_for_stock(10)
 
     local content = (ping_tier and "@everyone\n\n" or "")
         .. "**__Biome Hunt__**\n"
         .. "**Biome:** " .. biome .. "\n"
         .. "**Merchant:** " .. (script.state.merchant_name or "None") .. "\n"
-        .. stock_line
+
+    if script.state.merchant_name then
+        content = content .. "**Stock:** " .. (script.state.merchant_stock or "unknown") .. "\n"
+    end
+
+    content = content
         .. "**Players:** " .. script.actions.get_players_field() .. "\n"
         .. "**Join:** [Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
         .. "-# Sol's RNG • biome hunt"
@@ -721,28 +739,6 @@ function script.actions.notify_biome(biome)
     local delivered = script.actions.send_webhook(payload, true)
 
     print("[biome hunt] biome " .. biome .. (delivered and " reported" or " report failed"))
-end
-
-function script.actions.notify_merchant(merchant_name)
-    local biome = script.actions.get_current_biome()
-
-    local content = "**__Merchant Spawned__**\n"
-        .. "**Merchant:** " .. merchant_name .. "\n"
-        .. "**Biome:** " .. (biome ~= "Unknown" and biome or "?") .. "\n"
-        .. "**Players:** " .. script.actions.get_players_field() .. "\n"
-        .. "**Stock:** " .. (script.state.merchant_stock or "checking...") .. "\n"
-        .. "**Join:** [Join Server](" .. script.actions.get_server_join_link(game.JobId) .. ")\n"
-        .. "-# Sol's RNG • biome hunt"
-
-    local payload = {
-        username = webhook_username,
-        content = content,
-        flags = 4,
-    }
-
-    local delivered = script.actions.send_webhook(payload, true)
-
-    print("[biome hunt] merchant " .. merchant_name .. (delivered and " reported" or " report failed"))
 end
 
 function script.actions.fetch_server_candidates()
