@@ -571,7 +571,7 @@ function script.actions.fetch_server_candidates()
     end
 
     local url = string.format(
-        "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=2&limit=100",
+        "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
         game.PlaceId)
 
     local ok, response = script.actions.request_with_timeout({ Url = url, Method = "GET" })
@@ -598,17 +598,31 @@ function script.actions.fetch_server_candidates()
         return {}
     end
 
-    local candidates = {}
+    -- // prefer quiet servers (2-5 players, listed lowest first); fall back to
+    -- // any active server that is not full
+    local quiet = {}
+    local joinable = {}
 
     for _, server in ipairs(data.data) do
-        if type(server) == "table" and server.id ~= game.JobId
-            and (tonumber(server.playing) or 0) >= 1
-            and (tonumber(server.playing) or 0) < (tonumber(server.maxPlayers) or 12) - 1 then
-            table.insert(candidates, server.id)
+        if type(server) == "table" and server.id ~= game.JobId then
+            local playing = tonumber(server.playing) or 0
+            local max_players = tonumber(server.maxPlayers) or 12
+
+            if playing >= 2 and playing < max_players then
+                table.insert(joinable, server.id)
+
+                if playing <= 5 then
+                    table.insert(quiet, server.id)
+                end
+            end
         end
     end
 
-    return candidates
+    if #quiet > 0 then
+        return quiet
+    end
+
+    return joinable
 end
 
 function script.actions.queue_rejoin()
