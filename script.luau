@@ -997,7 +997,7 @@ function script.actions.run()
         game.Loaded:Wait()
     end
 
-    if not script.actions.wait_until_ready(90) then
+    if not script.actions.wait_until_ready(15) then
         print("[biome hunt] game never became ready — stopping")
         return
     end
