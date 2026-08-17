@@ -487,7 +487,7 @@ end
 function script.actions.notify_biome(biome)
     local ping_tier = script.actions.is_ping_biome(biome)
 
-    local description = "Biome is active in this server."
+    local description = "**" .. biome .. "** is active in this server."
 
     if script.state.merchant_name then
         description = description .. "\n**" .. script.state.merchant_name .. "** merchant is here right now."
@@ -502,7 +502,7 @@ function script.actions.notify_biome(biome)
     local payload = {
         username = webhook_username,
         embeds = { {
-            title = "Biome Hunt • " .. biome,
+            title = "Biome Hunt",
             color = script.actions.get_biome_color(biome),
             description = description,
             fields = {
